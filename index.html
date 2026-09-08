@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>한국맥널티(주) 커피사업부 채권 관리 대시보드</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            bg: '#f0f2f5',
+                            card: '#ffffff',
+                            textMain: '#374151',
+                            textMuted: '#6b7280',
+                            border: '#e5e7eb',
+                            teal: '#4fd1c5',
+                            blue: '#3b82f6',
+                            red: '#ef4444',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Noto Sans KR', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <!-- Chart.js & SheetJS -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <style>
+        body { background-color: #f0f2f5; color: #374151; font-family: 'Noto Sans KR', sans-serif; }
+        .kpi-card { background: #ffffff; border: 1px solid #e5e7eb; padding: 1.5rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05); border-radius: 0.5rem; }
+        .card-title { font-size: 0.875rem; font-weight: 700; color: #6b7280; margin-bottom: 1rem; }
+        
+        .data-list { width: 100%; border-collapse: collapse; }
+        .data-list th { text-align: left; padding: 0.5rem; font-weight: 500; color: #9ca3af; border-bottom: 1px solid #f3f4f6; font-size: 0.75rem; white-space: nowrap; }
+        .data-list td { padding: 0.5rem; border-bottom: 1px solid #f3f4f6; font-size: 0.8rem; }
+        .data-list tr:last-child td { border-bottom: none; }
+        
+        .clickable-row { cursor: pointer; transition: background-color 0.2s; }
+        .clickable-row:hover { background-color: #f9fafb; }
+        .clickable-row.active { background-color: #eff6ff; border-left: 3px solid #3b82f6; }
+        
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* 모달 활성화 CSS */
+        #longTermModal { display: none; }
+        #longTermModal.active { display: flex; }
+        #searchModal { display: none; }
+        #searchModal.active { display: flex; }
+        #deptModal { display: none; }
+        #deptModal.active { display: flex; }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-6">
+
+    <div class="max-w-[1600px] mx-auto space-y-6">
+        
+        <header class="flex flex-col xl:flex-row justify-between items-end pb-2 border-b border-gray-200 gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-700 tracking-wide">한국맥널티(주) 커피사업부 채권 관리 대시보드</h1>
+                <p class="text-sm text-gray-500 mt-1">
+                    영업일 PM 17:00 경 고정 업데이트 (서버 반영까지 5-10분 후 새로고침 필요. ※반영이 안될 시 쿠키를 지워주세요.)
+                    <span id="updateTimeDisplay" class="text-brand-teal ml-2 font-semibold"></span>
+                </p>
+                <p id="dataBaseDateContainer" class="text-sm font-bold text-brand-blue mt-1.5 flex items-center gap-1.5 hidden">
+                    <i class="fa-regular fa-calendar-check"></i>
+                    <span id="dataBaseDateDisplay"></span>
+                </p>
+            </div>
+            <div class="flex gap-3 items-center">
+                <!-- 검색창 -->
+                <div class="relative">
+                    <input type="text" id="clientSearchInput" placeholder="거래처명 검색..." onkeypress="handleSearch(event)" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-teal w-48 md:w-64">
+                    <button onclick="searchClient()" class="absolute right-2 top-1.5 text-gray-400 hover:text-brand-teal p-1">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                    </button>
+                </div>
+                <!-- 엑셀 업로드 버튼 -->
+                <button onclick="document.getElementById('excelUpload').click()" class="bg-white border border-gray-300 text-gray-700 font-medium px-4 py-2 text-sm rounded-lg hover:bg-gray-50 transition flex items-center gap-2 shadow-sm whitespace-nowrap">
+                    <i class="fa-solid fa-file-excel text-green-600"></i>
+                    <span>Data.xlsx 업로드</span>
+                </button>
+                <input type="file" id="excelUpload" accept=".xlsx, .xls" class="hidden" onchange="handleExcelUpload(event)">
+            </div>
+        </header>
+
+        <!-- KPI Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            <!-- 1. 전월 마감 후 잔액 -->
+            <div class="kpi-card flex flex-col items-center justify-center text-center relative group">
+                <div class="absolute z-50 w-[250px] p-3 bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-800 text-white text-[12px] text-left leading-relaxed rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                    <span class="font-bold text-brand-teal mb-1 block">상세설명</span>
+                    전월 마감 후 ERP상 이월 잔액 입니다.<br>(ex. 데이터 기준일 8월 → 7월 말 매출/매입마감 후 최종 잔액)
+                    <div class="absolute w-3 h-3 bg-gray-800 transform rotate-45 -bottom-1.5 left-1/2 -translate-x-1/2"></div>
+                </div>
+
+                <div class="card-title w-full text-center flex items-center justify-center gap-1.5 cursor-help">
+                    전월 마감 후 잔액 <i class="fa-regular fa-circle-question text-gray-400 font-normal"></i>
+                </div>
+                <div class="text-2xl font-bold text-gray-700 mt-2" id="valPrev">0</div>
+                <span class="text-xs text-gray-400 mt-1">백만원</span>
+            </div>
+            
+            <!-- 2. 8월 이전 매출 미처리 누적금액 -->
+            <div class="kpi-card flex flex-col items-center justify-center text-center relative group">
+                <div class="absolute z-50 w-[270px] p-3 bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-800 text-white text-[12px] text-left leading-relaxed rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                    <span class="font-bold text-brand-teal mb-1 block">상세설명</span>
+                    [+VAT] 전월 마감 후 ERP상 출고만 되고 매출로 넘기지 않은 금액 입니다.<br>(주요사유: 거래처 마감 기준에 따른 정산 이월, 클레임으로 인한 정산 이월)
+                    <div class="absolute w-3 h-3 bg-gray-800 transform rotate-45 -bottom-1.5 left-1/2 -translate-x-1/2"></div>
+                </div>
+
+                <div class="card-title w-full text-center flex items-center justify-center gap-1.5 cursor-help">
+                    <span id="titleShippedI">8월 이전 매출 미처리 누적금액</span> <i class="fa-regular fa-circle-question text-gray-400 font-normal"></i>
+                </div>
+                <div class="text-2xl font-bold text-gray-700 mt-2" id="valShippedI">0</div>
+                <span class="text-xs text-gray-400 mt-1">백만원</span>
+            </div>
+
+            <!-- 3. 8월 당월 출고 매출금액 -->
+            <div class="kpi-card flex flex-col items-center justify-center text-center relative group">
+                <div class="absolute z-50 w-[210px] p-3 bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-800 text-white text-[12px] text-left leading-relaxed rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                    <span class="font-bold text-brand-teal mb-1 block">상세설명</span>
+                    [+VAT] 당월 출고 된 금액 입니다.
+                    <div class="absolute w-3 h-3 bg-gray-800 transform rotate-45 -bottom-1.5 left-1/2 -translate-x-1/2"></div>
+                </div>
+
+                <div class="card-title w-full text-center flex items-center justify-center gap-1.5 cursor-help">
+                    <span id="titleShippedJ">8월 당월 출고 매출금액</span> <i class="fa-regular fa-circle-question text-gray-400 font-normal"></i>
+                </div>
+                <div class="text-2xl font-bold text-gray-700 mt-2" id="valShippedJ">0</div>
+                <span class="text-xs text-gray-400 mt-1">백만원</span>
+            </div>
+
+            <!-- 4. 당월 총 입금 (수금액) -->
+            <div class="kpi-card flex flex-col items-center justify-center text-center relative group">
+                <div class="absolute z-50 w-[190px] p-3 bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-800 text-white text-[12px] text-left leading-relaxed rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                    <span class="font-bold text-brand-teal mb-1 block">상세설명</span>
+                    당월 입금처리 된 금액 입니다.
+                    <div class="absolute w-3 h-3 bg-gray-800 transform rotate-45 -bottom-1.5 left-1/2 -translate-x-1/2"></div>
+                </div>
+
+                <div class="card-title w-full text-center flex items-center justify-center gap-1.5 cursor-help">
+                    당월 총 입금 (수금액) <i class="fa-regular fa-circle-question text-gray-400 font-normal"></i>
+                </div>
+                <div class="text-2xl font-bold text-brand-teal mt-2" id="valCollected">0</div>
+                <span class="text-xs text-gray-400 mt-1">백만원</span>
+            </div>
+
+            <!-- 5. 총 채권 잔액 (현 기준 잔액) -->
+            <div class="kpi-card flex flex-col items-center justify-center text-center relative group">
+                <div class="absolute z-50 w-[290px] p-3 bottom-full right-[-10px] md:left-1/2 md:-translate-x-1/2 mb-2 bg-gray-800 text-white text-[12px] text-left leading-relaxed rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                    <span class="font-bold text-brand-teal mb-1 block">상세설명</span>
+                    [전월 마감 후 잔액] + [매출 미처리 누적금액] + [당월 출고 매출금액] - [당월 총 입금 (수금액)]
+                    <div class="absolute w-3 h-3 bg-gray-800 transform rotate-45 -bottom-1.5 right-6 md:right-auto md:left-1/2 md:-translate-x-1/2"></div>
+                </div>
+
+                <div class="card-title w-full text-center flex items-center justify-center gap-1.5 cursor-help">
+                    총 채권 잔액 (현 기준 잔액) <i class="fa-regular fa-circle-question text-gray-400 font-normal"></i>
+                </div>
+                <div class="text-2xl font-bold text-gray-700 mt-2" id="valCurrent">0</div>
+                <span class="text-xs text-gray-400 mt-1">백만원</span>
+                
+                <!-- 동적 장기미수 툴팁 및 버튼 -->
+                <div class="mt-3 pt-3 border-t border-gray-100 w-full cursor-pointer hover:bg-red-50/50 transition rounded group/btn relative" onclick="openModal()">
+                    <div class="absolute z-50 w-[max-content] px-3 py-2 bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-800 text-white text-[12px] text-center rounded-lg shadow-xl opacity-0 invisible group-hover/btn:opacity-100 group-hover/btn:visible transition-all duration-200 whitespace-nowrap">
+                        <span class="dyn-lt">장기미수</span>
+                        <div class="absolute w-3 h-3 bg-gray-800 transform rotate-45 -bottom-1.5 left-1/2 -translate-x-1/2"></div>
+                    </div>
+
+                    <div class="text-[11px] text-gray-500 flex items-center justify-center gap-1 group-hover/btn:text-brand-red transition">
+                        <i class="fa-solid fa-triangle-exclamation text-brand-red"></i> <span class="dyn-lt font-semibold">장기미수</span>
+                    </div>
+                    <div class="text-sm font-bold text-brand-red mt-1" id="valLongterm">0</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <!-- Dept Summary List -->
+            <div class="kpi-card flex flex-col overflow-hidden">
+                <div class="card-title flex justify-between items-center">
+                    <span>부서별 종합 현황</span>
+                    <span class="text-[10px] font-normal text-white bg-brand-blue px-2 py-1 rounded">Click row to view details</span>
+                </div>
+                <div class="overflow-x-auto overflow-y-auto flex-grow" style="max-height: 300px;">
+                    <table class="data-list min-w-[600px]">
+                        <thead class="sticky top-0 bg-white">
+                            <tr>
+                                <th>부서명</th>
+                                <th class="text-right">전월미수</th>
+                                <th class="text-right">출고처리</th>
+                                <th class="text-right">당월수금</th>
+                                <th class="text-right font-bold text-gray-700">현잔액</th>
+                                <th class="text-right text-brand-red dyn-lt">장기미수</th>
+                            </tr>
+                        </thead>
+                        <tbody id="deptTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Dept Bar Chart -->
+            <div class="kpi-card">
+                <div class="card-title">부서별 수금 진척 현황</div>
+                <div class="h-64 w-full relative">
+                    <canvas id="deptBarChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 gap-6">
+            <!-- Manager Summary List -->
+            <div class="kpi-card flex flex-col overflow-hidden">
+                <div class="card-title flex justify-between items-center">
+                    <span>담당자별 현황</span>
+                    <span class="text-[10px] font-normal text-white bg-brand-blue px-2 py-1 rounded">Click to view clients</span>
+                </div>
+                <div class="overflow-x-auto overflow-y-auto flex-grow pr-2" style="max-height: 400px;">
+                    <table class="data-list min-w-[600px]">
+                        <thead class="sticky top-0 bg-white shadow-sm z-10">
+                            <tr>
+                                <th class="px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortManagerTable('manager')">담당자(부서) <i id="sortIconMgr_manager" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortManagerTable('prev')">전월미수 <i id="sortIconMgr_prev" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortManagerTable('shipped')">출고처리 <i id="sortIconMgr_shipped" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortManagerTable('collected')">당월수금 <i id="sortIconMgr_collected" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortManagerTable('current')">현잔액 <i id="sortIconMgr_current" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortManagerTable('longterm')"><span class="dyn-lt">장기미수</span> <i id="sortIconMgr_longterm" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                            </tr>
+                        </thead>
+                        <tbody id="managerTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Client Details (연령 분석) -->
+            <div class="kpi-card flex flex-col overflow-hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <div class="card-title mb-0" id="clientDetailTitle">[거래처 상세 현황] 담당자를 선택하세요</div>
+                    <div class="text-[10px] text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                        <span class="text-brand-red font-bold">Red</span>: 장기미수 보유
+                    </div>
+                </div>
+                
+                <div class="overflow-x-auto overflow-y-auto flex-grow border border-gray-100 rounded bg-gray-50/50 p-2" style="max-height: 400px;">
+                    <table class="data-list bg-white min-w-[600px]">
+                        <thead class="sticky top-0 bg-white shadow-sm z-10">
+                            <tr>
+                                <th class="px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortClientTable('client')">거래처명 <i id="sortIcon_client" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortClientTable('prev')">전월미수 <i id="sortIcon_prev" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortClientTable('shipped')">출고처리 <i id="sortIcon_shipped" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortClientTable('collected')">당월수금 <i id="sortIcon_collected" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortClientTable('current')">현잔액 <i id="sortIcon_current" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortClientTable('month0')"><span class="dyn-m0">당월발생분</span> <i id="sortIcon_month0" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortClientTable('month1')"><span class="dyn-m1">1개월전</span> <i id="sortIcon_month1" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortClientTable('month2')"><span class="dyn-m2">2개월전</span> <i id="sortIcon_month2" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                                <th class="text-right px-2 cursor-pointer hover:text-blue-600 select-none" onclick="sortClientTable('longterm')"><span class="dyn-lt">장기미수</span> <i id="sortIcon_longterm" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                            </tr>
+                        </thead>
+                        <tbody id="clientTableBody">
+                            <tr><td colspan="9" class="text-center py-10 text-gray-400">담당자를 선택하시면 상세 거래처 내역이 표시됩니다.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dept Modal (부서별 상세 모달) -->
+    <div id="deptModal" class="fixed inset-0 bg-gray-900/50 backdrop-blur-sm z-50 items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-6xl w-full max-h-[80vh] flex flex-col overflow-hidden border border-gray-200">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 class="font-bold text-lg text-gray-800 flex items-center gap-2">
+                    <i class="fa-solid fa-building text-brand-blue"></i>
+                    <span id="deptModalTitle">부서 상세 현황</span>
+                </h3>
+                <button onclick="closeDeptModal()" class="text-gray-400 hover:text-gray-700 transition">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto flex-grow">
+                <table class="data-list w-full">
+                    <thead class="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                        <tr>
+                            <th class="p-2 whitespace-nowrap cursor-pointer hover:text-blue-600 select-none" onclick="sortDeptDetailTable('dept')">부서 <i id="sortIconDept_dept" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                            <th class="p-2 whitespace-nowrap cursor-pointer hover:text-blue-600 select-none" onclick="sortDeptDetailTable('manager')">담당자 <i id="sortIconDept_manager" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                            <th class="p-2 whitespace-nowrap cursor-pointer hover:text-blue-600 select-none" onclick="sortDeptDetailTable('client')">거래처명 <i id="sortIconDept_client" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                            <th class="p-2 text-right whitespace-nowrap cursor-pointer hover:text-blue-600 select-none" onclick="sortDeptDetailTable('prev')">전월미수 <i id="sortIconDept_prev" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                            <th class="p-2 text-right whitespace-nowrap cursor-pointer hover:text-blue-600 select-none" onclick="sortDeptDetailTable('current')">현잔액 <i id="sortIconDept_current" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                            <th class="p-2 text-right whitespace-nowrap cursor-pointer hover:text-blue-600 select-none" onclick="sortDeptDetailTable('month0')"><span class="dyn-m0">당월발생</span> <i id="sortIconDept_month0" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                            <th class="p-2 text-right whitespace-nowrap cursor-pointer hover:text-blue-600 select-none" onclick="sortDeptDetailTable('month1')"><span class="dyn-m1">1개월전</span> <i id="sortIconDept_month1" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                            <th class="p-2 text-right whitespace-nowrap cursor-pointer hover:text-blue-600 select-none" onclick="sortDeptDetailTable('month2')"><span class="dyn-m2">2개월전</span> <i id="sortIconDept_month2" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                            <th class="p-2 text-right font-bold text-brand-red whitespace-nowrap cursor-pointer hover:text-blue-600 select-none" onclick="sortDeptDetailTable('longterm')"><span class="dyn-lt">장기미수</span> <i id="sortIconDept_longterm" class="fa-solid fa-sort text-[10px] text-gray-400"></i></th>
+                        </tr>
+                    </thead>
+                    <tbody id="deptDetailTableBody"></tbody>
+                </table>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end">
+                <button onclick="closeDeptModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition font-medium text-sm">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Long-term Modal -->
+    <div id="longTermModal" class="fixed inset-0 bg-gray-900/50 backdrop-blur-sm z-50 items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-6xl w-full max-h-[80vh] flex flex-col overflow-hidden border border-gray-200">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 class="font-bold text-lg text-gray-800 flex items-center gap-2">
+                    <i class="fa-solid fa-triangle-exclamation text-brand-red"></i>
+                    <span class="dyn-lt">장기미수</span> 거래처 상세 명단 (원 단위)
+                </h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-700 transition">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto flex-grow">
+                <table class="data-list w-full">
+                    <thead class="bg-gray-50 sticky top-0">
+                        <tr>
+                            <th class="p-2 whitespace-nowrap">부서</th>
+                            <th class="p-2 whitespace-nowrap">담당자</th>
+                            <th class="p-2 whitespace-nowrap">거래처명</th>
+                            <th class="p-2 text-right whitespace-nowrap">전월미수</th>
+                            <th class="p-2 text-right whitespace-nowrap">현잔액</th>
+                            <th class="p-2 text-right whitespace-nowrap dyn-m0">당월발생</th>
+                            <th class="p-2 text-right whitespace-nowrap dyn-m1">1개월전</th>
+                            <th class="p-2 text-right whitespace-nowrap dyn-m2">2개월전</th>
+                            <th class="p-2 text-right font-bold text-brand-red whitespace-nowrap dyn-lt">장기미수</th>
+                        </tr>
+                    </thead>
+                    <tbody id="longTermTableBody"></tbody>
+                </table>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end">
+                <button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition font-medium text-sm">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search Modal -->
+    <div id="searchModal" class="fixed inset-0 bg-gray-900/50 backdrop-blur-sm z-50 items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[80vh] flex flex-col overflow-hidden border border-gray-200">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 class="font-bold text-lg text-gray-800 flex items-center gap-2">
+                    <i class="fa-solid fa-magnifying-glass text-brand-teal"></i>
+                    거래처 검색 결과
+                </h3>
+                <button onclick="closeSearchModal()" class="text-gray-400 hover:text-gray-700 transition">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto flex-grow" id="searchResultContent"></div>
+            <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end">
+                <button onclick="closeSearchModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition font-medium text-sm">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT -->
+    <script>
+        const formatKRW = (num) => new Intl.NumberFormat('ko-KR').format(Math.round(num));
+        const formatMil = (num) => new Intl.NumberFormat('ko-KR').format(Math.round(num / 1000000));
+
+        let rawData = [];
+        let deptData = {};
+        let managerData = {};
+        let longTermClients = [];
+        let chartInstance = null;
+
+        // 클라이언트(거래처) 정렬 상태
+        let activeManagerName = null;
+        let clientSortColumn = 'current';
+        let clientSortAsc = false;
+
+        // 담당자 정렬 상태
+        let managerSortColumn = 'manager'; 
+        let managerSortAsc = true;
+        
+        // 부서 모달 정렬 상태
+        let activeDeptName = null;
+        let deptSortColumn = 'current';
+        let deptSortAsc = false;
+
+        // 동적 헤더 타이틀 저장 (기본값)
+        let dynamicHeaders = { 
+            m0: '당월 발생분', 
+            m1: '1개월전 발생분', 
+            m2: '2개월전 발생분', 
+            lt: '장기미수',
+            shippedI: '8월 이전 매출 미처리 누적금액',
+            shippedJ: '8월 당월 출고 매출금액'
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initChart();
+            loadServerData();
+        });
+
+        // HTML 내의 모든 동적 텍스트 클래스 및 제목 업데이트
+        function updateDynamicHeaders() {
+            document.querySelectorAll('.dyn-m0').forEach(el => el.innerText = dynamicHeaders.m0);
+            document.querySelectorAll('.dyn-m1').forEach(el => el.innerText = dynamicHeaders.m1);
+            document.querySelectorAll('.dyn-m2').forEach(el => el.innerText = dynamicHeaders.m2);
+            document.querySelectorAll('.dyn-lt').forEach(el => el.innerText = dynamicHeaders.lt);
+            
+            // KPI 카드 제목 동적 업데이트
+            const titleShippedI = document.getElementById('titleShippedI');
+            if(titleShippedI) titleShippedI.innerText = dynamicHeaders.shippedI;
+            
+            const titleShippedJ = document.getElementById('titleShippedJ');
+            if(titleShippedJ) titleShippedJ.innerText = dynamicHeaders.shippedJ;
+        }
+
+        function initChart() {
+            try {
+                const canvas = document.getElementById('deptBarChart');
+                if(!canvas) return;
+                const ctx = canvas.getContext('2d');
+                chartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels: [], datasets: [] },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+                        scales: { y: { beginAtZero: true } }
+                    }
+                });
+            } catch (e) {
+                console.warn("차트 초기화 중 오류가 발생했습니다.", e);
+            }
+        }
+
+        function loadServerData() {
+            fetch('Data.xlsx')
+                .then(response => {
+                    if (!response.ok) throw new Error("File not found");
+                    return response.arrayBuffer();
+                })
+                .then(buffer => {
+                    const workbook = XLSX.read(buffer, { type: 'array' });
+                    let sheetName = workbook.SheetNames.find(s => s.toLowerCase() === 'data') || workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    
+                    const b3Cell = worksheet['B3'];
+                    if (b3Cell) {
+                        document.getElementById('dataBaseDateDisplay').innerText = (b3Cell.w || b3Cell.v);
+                        document.getElementById('dataBaseDateContainer').classList.remove('hidden');
+                    } else {
+                        document.getElementById('dataBaseDateContainer').classList.add('hidden');
+                    }
+
+                    const b4Cell = worksheet['B4'];
+                    if (b4Cell) {
+                        document.getElementById('updateTimeDisplay').innerText = `(Data 갱신: ${b4Cell.w || b4Cell.v})`;
+                    }
+
+                    // 엑셀 I5, J5, N5, O5, P5, Q5 셀 값 직접 읽어와서 헤더 세팅
+                    if (worksheet['I5']) dynamicHeaders.shippedI = String(worksheet['I5'].w || worksheet['I5'].v).trim();
+                    if (worksheet['J5']) dynamicHeaders.shippedJ = String(worksheet['J5'].w || worksheet['J5'].v).trim();
+                    if (worksheet['N5']) dynamicHeaders.m0 = String(worksheet['N5'].w || worksheet['N5'].v).trim();
+                    if (worksheet['O5']) dynamicHeaders.m1 = String(worksheet['O5'].w || worksheet['O5'].v).trim();
+                    if (worksheet['P5']) dynamicHeaders.m2 = String(worksheet['P5'].w || worksheet['P5'].v).trim();
+                    if (worksheet['Q5']) dynamicHeaders.lt = String(worksheet['Q5'].w || worksheet['Q5'].v).trim();
+                    updateDynamicHeaders();
+
+                    const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 'A', defval: '' });
+                    processData(jsonRows);
+                })
+                .catch(err => {
+                    console.log("로컬환경 또는 파일을 찾을 수 없어 데모 데이터를 로드합니다.", err);
+                    loadMockData(); 
+                });
+        }
+
+        // 각 모달들 열고 닫는 함수
+        function openModal() { document.getElementById('longTermModal').classList.add('active'); }
+        function closeModal() { document.getElementById('longTermModal').classList.remove('active'); }
+        function closeSearchModal() { document.getElementById('searchModal').classList.remove('active'); }
+        function closeDeptModal() { document.getElementById('deptModal').classList.remove('active'); }
+        
+        function handleSearch(event) { if (event.key === 'Enter') searchClient(); }
+        
+        function searchClient() {
+            const query = document.getElementById('clientSearchInput').value.trim().toLowerCase();
+            if (!query) {
+                alert("검색할 거래처명을 입력해주세요.");
+                return;
+            }
+            const results = rawData.filter(r => r.client.toLowerCase().includes(query));
+            const contentDiv = document.getElementById('searchResultContent');
+            
+            if (results.length === 0) {
+                contentDiv.innerHTML = `<div class="text-center py-10 text-gray-500">"${query}"에 대한 검색 결과를 찾을 수 없습니다.</div>`;
+            } else {
+                let html = `<table class="data-list w-full"><thead class="bg-gray-50 sticky top-0"><tr>
+                    <th class="p-2">거래처명</th><th class="p-2">부서</th><th class="p-2">담당자</th>
+                    <th class="p-2 text-right">전월미수</th><th class="p-2 text-right">출고처리</th>
+                    <th class="p-2 text-right">당월수금</th><th class="p-2 text-right">현잔액</th>
+                    <th class="p-2 text-right dyn-lt">${dynamicHeaders.lt}</th>
+                    </tr></thead><tbody>`;
+                results.forEach(r => {
+                    let ltColor = r.longterm > 0 ? 'text-brand-red font-bold' : 'text-gray-400';
+                    html += `<tr class="border-b border-gray-100 hover:bg-gray-50">
+                        <td class="p-2 font-bold">${r.client}</td>
+                        <td class="p-2 text-xs text-gray-500">${r.dept}</td>
+                        <td class="p-2 text-xs font-bold">${r.manager}</td>
+                        <td class="p-2 text-right text-xs text-gray-500">${formatKRW(r.prev)}</td>
+                        <td class="p-2 text-right text-xs text-gray-500">${formatKRW(r.shipped)}</td>
+                        <td class="p-2 text-right text-xs text-brand-teal">${formatKRW(r.collected)}</td>
+                        <td class="p-2 text-right text-xs font-bold text-gray-700">${formatKRW(r.current)}</td>
+                        <td class="p-2 text-right text-xs ${ltColor}">${formatKRW(r.longterm)}</td>
+                    </tr>`;
+                });
+                html += `</tbody></table>`;
+                contentDiv.innerHTML = html;
+            }
+            document.getElementById('searchModal').classList.add('active');
+        }
+
+        function handleExcelUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    let sheetName = workbook.SheetNames.find(s => s.toLowerCase() === 'data') || workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    
+                    const b3Cell = worksheet['B3'];
+                    if (b3Cell) {
+                        document.getElementById('dataBaseDateDisplay').innerText = (b3Cell.w || b3Cell.v);
+                        document.getElementById('dataBaseDateContainer').classList.remove('hidden');
+                    } else {
+                        document.getElementById('dataBaseDateContainer').classList.add('hidden');
+                    }
+
+                    const b4Cell = worksheet['B4'];
+                    if (b4Cell) {
+                        document.getElementById('updateTimeDisplay').innerText = `(Data 갱신: ${b4Cell.w || b4Cell.v})`;
+                    }
+
+                    // 엑셀 I5, J5, N5, O5, P5, Q5 셀 값 직접 읽어와서 헤더 세팅
+                    if (worksheet['I5']) dynamicHeaders.shippedI = String(worksheet['I5'].w || worksheet['I5'].v).trim();
+                    if (worksheet['J5']) dynamicHeaders.shippedJ = String(worksheet['J5'].w || worksheet['J5'].v).trim();
+                    if (worksheet['N5']) dynamicHeaders.m0 = String(worksheet['N5'].w || worksheet['N5'].v).trim();
+                    if (worksheet['O5']) dynamicHeaders.m1 = String(worksheet['O5'].w || worksheet['O5'].v).trim();
+                    if (worksheet['P5']) dynamicHeaders.m2 = String(worksheet['P5'].w || worksheet['P5'].v).trim();
+                    if (worksheet['Q5']) dynamicHeaders.lt = String(worksheet['Q5'].w || worksheet['Q5'].v).trim();
+                    updateDynamicHeaders();
+
+                    const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 'A', defval: '' });
+                    processData(jsonRows);
+                } catch (error) {
+                    console.error("Excel parsing error:", error);
+                    alert("데이터 처리 중 오류가 발생했습니다.\n상세 사유: " + error.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        const parseNum = (val) => {
+            if (typeof val === 'number') return val;
+            if (!val) return 0;
+            let str = String(val).replace(/,/g, '').trim();
+            if (str.startsWith('(') && str.endsWith(')')) str = '-' + str.slice(1, -1);
+            const num = parseFloat(str);
+            return isNaN(num) ? 0 : num;
+        };
+
+        function processData(jsonRows) {
+            rawData = [];
+            deptData = {};
+            managerData = {};
+            longTermClients = [];
+            activeManagerName = null;
+            document.getElementById('clientDetailTitle').innerText = '[거래처 상세 현황] 담당자를 선택하세요';
+            document.getElementById('clientTableBody').innerHTML = '<tr><td colspan="9" class="text-center py-10 text-gray-400">담당자를 선택하시면 상세 거래처 내역이 표시됩니다.</td></tr>';
+
+            let dataStarted = false;
+            let lastDept = "미지정부서";
+            let lastManager = "미지정담당자";
+
+            for (let i = 0; i < jsonRows.length; i++) {
+                let row = jsonRows[i];
+                if (!row) continue;
+
+                let b = String(row.B || '').trim();
+                let c = String(row.C || '').trim();
+                let d = String(row.D || '').trim();
+
+                // 헤더 스캐닝 및 데이터 시작 분기
+                if (!dataStarted) {
+                    if (b.includes('거래처') || b === '거래처명') {
+                        dataStarted = true;
+                        continue;
+                    }
+                    if (i > 7) dataStarted = true; // 강제 시작점 보장
+                    continue;
+                }
+
+                const rowStr = Object.values(row).join('').replace(/\s+/g, '');
+                if (rowStr === '' || rowStr.includes('총합계') || rowStr.includes('합계') || rowStr.includes('총계') || rowStr.includes('소계') || rowStr.includes('#미등록')) {
+                    continue;
+                }
+
+                if (c) lastDept = c; else c = lastDept;
+                if (d) lastManager = d; else d = lastManager;
+                if (!b) b = '미지정거래처';
+
+                let prev = parseNum(row.H);
+                let shipped_i = parseNum(row.I);
+                let shipped_j = parseNum(row.J);
+                let shipped = shipped_i + shipped_j;
+                let collected = parseNum(row.K);
+                let current = parseNum(row.L);
+                
+                // 연령별 채권 데이터 파싱
+                let month0 = parseNum(row.N);
+                let month1 = parseNum(row.O);
+                let month2 = parseNum(row.P);
+                let longterm = parseNum(row.Q);
+
+                if (prev === 0 && shipped === 0 && collected === 0 && current === 0 && longterm === 0) continue;
+
+                const record = { dept: c, manager: d, client: b, prev, shipped, shipped_i, shipped_j, collected, current, month0, month1, month2, longterm };
+                rawData.push(record);
+
+                if (longterm > 0) longTermClients.push(record);
+
+                if (!deptData[c]) deptData[c] = { prev: 0, shipped: 0, shipped_i: 0, shipped_j: 0, collected: 0, current: 0, month0: 0, month1: 0, month2: 0, longterm: 0 };
+                deptData[c].prev += prev;
+                deptData[c].shipped += shipped;
+                deptData[c].shipped_i += shipped_i;
+                deptData[c].shipped_j += shipped_j;
+                deptData[c].collected += collected;
+                deptData[c].current += current;
+                deptData[c].month0 += month0;
+                deptData[c].month1 += month1;
+                deptData[c].month2 += month2;
+                deptData[c].longterm += longterm;
+
+                if (!managerData[d]) managerData[d] = { dept: c, prev: 0, shipped: 0, shipped_i: 0, shipped_j: 0, collected: 0, current: 0, month0: 0, month1: 0, month2: 0, longterm: 0, clients: [] };
+                managerData[d].prev += prev;
+                managerData[d].shipped += shipped;
+                managerData[d].shipped_i += shipped_i;
+                managerData[d].shipped_j += shipped_j;
+                managerData[d].collected += collected;
+                managerData[d].current += current;
+                managerData[d].month0 += month0;
+                managerData[d].month1 += month1;
+                managerData[d].month2 += month2;
+                managerData[d].longterm += longterm;
+                managerData[d].clients.push(record);
+            }
+
+            if (rawData.length === 0) {
+                loadMockData();
+                return;
+            }
+
+            updateDashboardUI();
+        }
+
+        function updateDashboardUI() {
+            let totalPrev = 0, totalShipped = 0, totalShippedI = 0, totalShippedJ = 0, totalCollected = 0, totalCurrent = 0, totalLongTerm = 0;
+            Object.values(deptData).forEach(d => {
+                totalPrev += d.prev; 
+                totalShipped += d.shipped; 
+                totalShippedI += d.shipped_i; 
+                totalShippedJ += d.shipped_j; 
+                totalCollected += d.collected; 
+                totalCurrent += d.current; 
+                totalLongTerm += d.longterm; // 전체 장기미수 합계
+            });
+
+            document.getElementById('valPrev').innerText = formatMil(totalPrev);
+            document.getElementById('valShippedI').innerText = formatMil(totalShippedI);
+            document.getElementById('valShippedJ').innerText = formatMil(totalShippedJ);
+            document.getElementById('valCollected').innerText = formatMil(totalCollected);
+            document.getElementById('valCurrent').innerText = formatMil(totalCurrent);
+            document.getElementById('valLongterm').innerText = formatKRW(totalLongTerm);
+
+            const deptTbody = document.getElementById('deptTableBody');
+            deptTbody.innerHTML = '';
+            
+            let chartLabels = [];
+            let chartData = { prev: [], shipped: [], collected: [], current: [], longterm: [] };
+
+            Object.entries(deptData).forEach(([dept, data]) => {
+                // 부서 행 클릭 시 모달창 열리도록 onclick 속성 추가
+                deptTbody.innerHTML += `
+                    <tr class="hover:bg-gray-50 clickable-row" onclick="openDeptModal('${dept}')">
+                        <td class="font-bold text-gray-700 cursor-pointer text-brand-blue underline decoration-brand-blue/30 underline-offset-4">${dept}</td>
+                        <td class="text-right text-gray-500">${formatKRW(data.prev)}</td>
+                        <td class="text-right text-gray-500">${formatKRW(data.shipped)}</td>
+                        <td class="text-right text-brand-teal font-medium">${formatKRW(data.collected)}</td>
+                        <td class="text-right font-bold text-gray-700">${formatKRW(data.current)}</td>
+                        <td class="text-right font-bold text-brand-red">${formatKRW(data.longterm)}</td>
+                    </tr>
+                `;
+                chartLabels.push(dept);
+                chartData.prev.push(data.prev / 1000000);
+                chartData.shipped.push(data.shipped / 1000000);
+                chartData.collected.push(data.collected / 1000000);
+                chartData.current.push(data.current / 1000000);
+                chartData.longterm.push(data.longterm / 1000000);
+            });
+
+            if (chartInstance) {
+                chartInstance.data.labels = chartLabels;
+                chartInstance.data.datasets = [
+                    { label: '전월 미수', data: chartData.prev, backgroundColor: '#94a3b8', borderRadius: 4 },
+                    { label: '출고 처리', data: chartData.shipped, backgroundColor: '#fcd34d', borderRadius: 4 },
+                    { label: '당월 수금', data: chartData.collected, backgroundColor: '#4fd1c5', borderRadius: 4 },
+                    { label: '현 잔액', data: chartData.current, backgroundColor: '#3b82f6', borderRadius: 4 },
+                    { label: dynamicHeaders.lt, data: chartData.longterm, backgroundColor: '#ef4444', borderRadius: 4 }
+                ];
+                chartInstance.update();
+            }
+
+            renderManagerTable();
+
+            // LongTerm 모달 리스트 업데이트
+            const longTbody = document.getElementById('longTermTableBody');
+            longTbody.innerHTML = '';
+            longTermClients.sort((a, b) => b.longterm - a.longterm).forEach(c => {
+                longTbody.innerHTML += `
+                    <tr class="border-b border-gray-100 hover:bg-red-50/30 transition">
+                        <td class="p-2 text-xs text-gray-500 whitespace-nowrap">${c.dept}</td>
+                        <td class="p-2 text-xs font-bold whitespace-nowrap">${c.manager}</td>
+                        <td class="p-2 text-sm font-bold text-gray-700 whitespace-nowrap">${c.client}</td>
+                        <td class="p-2 text-right text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.prev)}</td>
+                        <td class="p-2 text-right text-xs text-gray-700 font-bold whitespace-nowrap">${formatKRW(c.current)}</td>
+                        <td class="p-2 text-right text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.month0)}</td>
+                        <td class="p-2 text-right text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.month1)}</td>
+                        <td class="p-2 text-right text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.month2)}</td>
+                        <td class="p-2 text-right text-sm font-bold text-brand-red whitespace-nowrap">${formatKRW(c.longterm)}</td>
+                    </tr>
+                `;
+            });
+            if(longTermClients.length === 0) {
+                 longTbody.innerHTML = `<tr><td colspan="9" class="text-center py-8 text-gray-500">장기 미매출 처리 된 거래처가 없습니다.</td></tr>`;
+            }
+        }
+
+        // ================= 부서 상세 모달 정렬 및 렌더링 =================
+        function openDeptModal(deptName) {
+            activeDeptName = deptName;
+            document.getElementById('deptModalTitle').innerText = `[${deptName}] 상세 거래처 명단 (원 단위)`;
+            renderDeptDetails();
+            document.getElementById('deptModal').classList.add('active');
+        }
+
+        function renderDeptDetails() {
+            const tbody = document.getElementById('deptDetailTableBody');
+            tbody.innerHTML = '';
+            
+            // rawData에서 해당 부서 데이터만 필터링
+            let filtered = rawData.filter(r => r.dept === activeDeptName);
+            
+            filtered.sort((a, b) => {
+                let valA = a[deptSortColumn];
+                let valB = b[deptSortColumn];
+                if (typeof valA === 'string') {
+                    return deptSortAsc ? valA.localeCompare(valB, 'ko') : valB.localeCompare(valA, 'ko');
+                } else {
+                    return deptSortAsc ? valA - valB : valB - valA;
+                }
+            });
+
+            filtered.forEach(c => {
+                let ltColor = c.longterm > 0 ? 'text-brand-red font-bold' : 'text-gray-400';
+                tbody.innerHTML += `
+                    <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                        <td class="p-2 text-xs text-gray-500 whitespace-nowrap">${c.dept}</td>
+                        <td class="p-2 text-xs font-bold whitespace-nowrap">${c.manager}</td>
+                        <td class="p-2 text-sm font-bold text-gray-700 whitespace-nowrap">${c.client}</td>
+                        <td class="p-2 text-right text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.prev)}</td>
+                        <td class="p-2 text-right text-xs text-gray-700 font-bold whitespace-nowrap">${formatKRW(c.current)}</td>
+                        <td class="p-2 text-right text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.month0)}</td>
+                        <td class="p-2 text-right text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.month1)}</td>
+                        <td class="p-2 text-right text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.month2)}</td>
+                        <td class="p-2 text-right text-sm ${ltColor} whitespace-nowrap">${formatKRW(c.longterm)}</td>
+                    </tr>
+                `;
+            });
+            updateDeptSortIcons();
+            updateDynamicHeaders(); // 동적 텍스트 적용 (dyn-m0 등)
+        }
+
+        function sortDeptDetailTable(col) {
+            if (deptSortColumn === col) {
+                deptSortAsc = !deptSortAsc;
+            } else {
+                deptSortColumn = col;
+                deptSortAsc = (col === 'client' || col === 'manager' || col === 'dept');
+            }
+            renderDeptDetails();
+        }
+
+        function updateDeptSortIcons() {
+            ['dept', 'manager', 'client', 'prev', 'current', 'month0', 'month1', 'month2', 'longterm'].forEach(col => {
+                const icon = document.getElementById(`sortIconDept_${col}`);
+                if (!icon) return;
+                if (deptSortColumn === col) {
+                    icon.className = deptSortAsc ? "fa-solid fa-sort-up text-[11px] text-blue-600" : "fa-solid fa-sort-down text-[11px] text-blue-600";
+                } else {
+                    icon.className = "fa-solid fa-sort text-[10px] text-gray-400";
+                }
+            });
+        }
+
+        // ================= 담당자 정렬 및 렌더링 =================
+        function renderManagerTable() {
+            const mgrTbody = document.getElementById('managerTableBody');
+            mgrTbody.innerHTML = '';
+            
+            const managerEntries = Object.entries(managerData);
+            
+            managerEntries.sort(([mgrA, dataA], [mgrB, dataB]) => {
+                let valA, valB;
+                
+                if (managerSortColumn === 'manager') {
+                    valA = dataA.dept + mgrA;
+                    valB = dataB.dept + mgrB;
+                } else {
+                    valA = dataA[managerSortColumn];
+                    valB = dataB[managerSortColumn];
+                }
+
+                if (typeof valA === 'string') {
+                    return managerSortAsc ? valA.localeCompare(valB, 'ko') : valB.localeCompare(valA, 'ko');
+                } else {
+                    return managerSortAsc ? valA - valB : valB - valA;
+                }
+            });
+
+            managerEntries.forEach(([manager, data]) => {
+                let statusColor = data.longterm > 0 ? 'text-brand-red font-bold' : 'text-gray-400';
+                const tr = document.createElement('tr');
+                tr.className = 'clickable-row border-b border-gray-100';
+                if (manager === activeManagerName) tr.classList.add('active'); 
+
+                tr.onclick = () => renderClientDetails(manager, tr);
+                
+                tr.innerHTML = `
+                    <td class="py-2 pl-2">
+                        <div class="font-bold text-gray-800">${manager}</div>
+                        <div class="text-[10px] text-gray-400">${data.dept}</div>
+                    </td>
+                    <td class="text-right text-gray-500 text-xs">${formatKRW(data.prev)}</td>
+                    <td class="text-right text-gray-500 text-xs">${formatKRW(data.shipped)}</td>
+                    <td class="text-right text-brand-teal text-xs">${formatKRW(data.collected)}</td>
+                    <td class="text-right font-bold text-xs text-gray-600">${formatKRW(data.current)}</td>
+                    <td class="text-right text-xs ${statusColor}">${formatKRW(data.longterm)}</td>
+                `;
+                mgrTbody.appendChild(tr);
+            });
+            updateMgrSortIcons();
+        }
+
+        function sortManagerTable(col) {
+            if (managerSortColumn === col) {
+                managerSortAsc = !managerSortAsc;
+            } else {
+                managerSortColumn = col;
+                managerSortAsc = (col === 'manager'); 
+            }
+            renderManagerTable();
+        }
+
+        function updateMgrSortIcons() {
+            ['manager', 'prev', 'shipped', 'collected', 'current', 'longterm'].forEach(col => {
+                const icon = document.getElementById(`sortIconMgr_${col}`);
+                if (!icon) return;
+                if (managerSortColumn === col) {
+                    icon.className = managerSortAsc ? "fa-solid fa-sort-up text-[11px] text-blue-600" : "fa-solid fa-sort-down text-[11px] text-blue-600";
+                } else {
+                    icon.className = "fa-solid fa-sort text-[10px] text-gray-400";
+                }
+            });
+        }
+
+        // ================= 거래처 연령 상세 리스트 =================
+        function renderClientDetails(managerName, rowElement) {
+            if (managerName) activeManagerName = managerName;
+            if (rowElement) {
+                document.querySelectorAll('.clickable-row').forEach(el => el.classList.remove('active'));
+                rowElement.classList.add('active');
+            }
+
+            const mData = managerData[activeManagerName];
+            if (!mData) return;
+
+            document.getElementById('clientDetailTitle').innerText = `[${activeManagerName}] 거래처 상세 현황`;
+            const tbody = document.getElementById('clientTableBody');
+            tbody.innerHTML = '';
+
+            let sortedClients = [...mData.clients];
+            sortedClients.sort((a, b) => {
+                let valA = a[clientSortColumn];
+                let valB = b[clientSortColumn];
+                if (typeof valA === 'string') {
+                    return clientSortAsc ? valA.localeCompare(valB, 'ko') : valB.localeCompare(valA, 'ko');
+                } else {
+                    return clientSortAsc ? valA - valB : valB - valA;
+                }
+            });
+
+            sortedClients.forEach(c => {
+                let ltColor = c.longterm > 0 ? 'text-brand-red' : 'text-gray-400';
+                tbody.innerHTML += `
+                    <tr class="hover:bg-gray-50 transition-colors border-b border-gray-50">
+                        <td class="px-2 py-2 text-xs font-bold text-gray-700 whitespace-nowrap">${c.client}</td>
+                        <td class="text-right px-2 text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.prev)}</td>
+                        <td class="text-right px-2 text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.shipped)}</td>
+                        <td class="text-right px-2 text-xs text-brand-teal whitespace-nowrap">${formatKRW(c.collected)}</td>
+                        <td class="text-right px-2 text-xs font-bold text-gray-600 whitespace-nowrap">${formatKRW(c.current)}</td>
+                        <td class="text-right px-2 text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.month0)}</td>
+                        <td class="text-right px-2 text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.month1)}</td>
+                        <td class="text-right px-2 text-xs text-gray-500 whitespace-nowrap">${formatKRW(c.month2)}</td>
+                        <td class="text-right px-2 text-xs font-bold ${ltColor} whitespace-nowrap">${formatKRW(c.longterm)}</td>
+                    </tr>
+                `;
+            });
+            updateSortIcons();
+        }
+
+        function sortClientTable(col) {
+            if (clientSortColumn === col) {
+                clientSortAsc = !clientSortAsc;
+            } else {
+                clientSortColumn = col;
+                clientSortAsc = (col === 'client');
+            }
+            if (activeManagerName) {
+                renderClientDetails(null, null);
+            }
+        }
+
+        function updateSortIcons() {
+            ['client', 'prev', 'shipped', 'collected', 'current', 'month0', 'month1', 'month2', 'longterm'].forEach(col => {
+                const icon = document.getElementById(`sortIcon_${col}`);
+                if (!icon) return;
+                if (clientSortColumn === col) {
+                    icon.className = clientSortAsc ? "fa-solid fa-sort-up text-[11px] text-blue-600" : "fa-solid fa-sort-down text-[11px] text-blue-600";
+                } else {
+                    icon.className = "fa-solid fa-sort text-[10px] text-gray-400";
+                }
+            });
+        }
+
+        function loadMockData() {
+            dynamicHeaders = { 
+                m0: '8월 발생분', 
+                m1: '7월 발생분', 
+                m2: '6월 발생분', 
+                lt: '5월 이전 장기미수',
+                shippedI: '8월 이전 매출 미처리 누적금액',
+                shippedJ: '8월 당월 출고 매출금액'
+            };
+            updateDynamicHeaders();
+            const mockJSON = [
+                { B: '거래처명', N: '8월 발생분', O: '7월 발생분', P: '6월 발생분', Q: '5월 이전 장기미수' },
+                { B: '샘플거래처A', C: '기업영업팀', D: '홍길동', H: 10000000, I: 5000000, J: 5000000, K: 4000000, L: 16000000, N: 6000000, O: 5000000, P: 3000000, Q: 2000000 },
+                { B: '샘플거래처B', C: '온라인팀', D: '김철수', H: 20000000, I: 10000000, J: 5000000, K: 8000000, L: 27000000, N: 17000000, O: 10000000, P: 0, Q: 0 }
+            ];
+            processData(mockJSON);
+        }
+    </script>
+</body>
+</html>
